@@ -5,6 +5,10 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
+
 #ifdef _WIN32
 #include <Windows.h>
 #endif
@@ -49,10 +53,10 @@ struct Quad {
     Vertex v[4];
 
     Quad(Rectf rect, Color color) {
-        v[0] = { .position = { rect.x, rect.y },                         .color = Color(255, 100, 100) };
-        v[1] = { .position = { (rect.x + rect.w), rect.y },              .color = Color(255, 100, 100) };
-        v[2] = { .position = { (rect.x + rect.w), (rect.y + rect.h) },   .color = Color(100, 100, 255) };
-        v[3] = { .position = { rect.x, (rect.y + rect.h) },              .color = Color(100, 255, 100) };
+        v[0] = { .position = { rect.x, rect.y },                         .color = color };
+        v[1] = { .position = { (rect.x + rect.w), rect.y },              .color = color };
+        v[2] = { .position = { (rect.x + rect.w), (rect.y + rect.h) },   .color = color };
+        v[3] = { .position = { rect.x, (rect.y + rect.h) },              .color = color };
     }
 };
 #pragma pack(pop)
@@ -65,9 +69,10 @@ layout (location = 1) in vec4 color;
 out vec4 o_color;
 
 uniform mat4 proj;
+uniform mat4 view;
 
 void main() {
-	gl_Position = proj * vec4(position, 0.0, 1.0);
+	gl_Position = view * proj * vec4(position, 0.0, 1.0);
 	o_color = color;
 })";
 
@@ -248,9 +253,9 @@ int main() {
     std::vector<Quad> quads;
     std::vector<Index> indices;
     int i = 0;
-    for (int x = 0; x < 100; x++) {
-        for (int y = 0; y < 10; y++) {
-            quads.push_back({ Rectf { (float)x * 32.f, (float)y * 32.f, 32.0f, 32.0f }, Color(100, 100, 100) });
+    for (int x = 0; x < 30; x++) {
+        for (int y = 0; y < 20; y++) {
+            quads.push_back({ Rectf { (float)x * 32.f, (float)y * 32.f, 32.0f, 32.0f }, Color(100 + x, 100 + y, 100) });
             
             {
                 int _i = i;
@@ -305,13 +310,117 @@ int main() {
     uint32_t location = glGetUniformLocation(program, "proj");
     glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(projectionMatrix));
 
+    //glm::vec3 cameraPosition = glm::vec3(0.0f, 0.0f, 3.0f);
+    //glm::vec3 cameraTarget = glm::vec3(0.0f, 0.0f, 0.0f);
+    //glm::vec3 upVector = glm::vec3(0.0f, 1.0f, 0.0f);
+
+    //// Create a view matrix
+    //glm::mat4 viewMatrix = glm::lookAt(cameraPosition, cameraTarget, upVector);
+
+    struct UserPtr {
+        uint32_t program;
+        int width, height;
+    };
+
+    UserPtr ptr = { program, 768, 1024 };
+    glfwSetWindowUserPointer(window, &ptr);
+    glfwSetFramebufferSizeCallback(window, [](GLFWwindow* window, int width, int height) {
+        glm::mat4 projectionMatrix = glm::ortho(0.0f, (float)width, (float)height, 0.0f);
+
+        UserPtr* program = (UserPtr*)glfwGetWindowUserPointer(window);
+        uint32_t location = glGetUniformLocation(program->program, "proj");
+        glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+
+        glViewport(0, 0, width, height);
+
+        program->width = width;
+        program->height = height;
+    });
+
+    glm::vec2 cameraPosition(0.0f, 0.0f);
+    glm::vec2 targetPosition(0.0f, 0.0f);
+    // float cameraSpeed = 2.5f;
+
+    // Time-related variables
+    float deltaTime = 0.0f;
+    float lastFrame = 0.0f;
+
+    uint32_t view_location = glGetUniformLocation(program, "view");
+
+    // Setup ImGui context
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+
+    // Initialize ImGui for GLFW and OpenGL3
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330 core");
+
+    (void)ImGui::GetIO();
+
+    float zoomLevel = 1.0f;
+    float cameraSpeed = 2.5f;
+
+    glm::vec2 viewpoint(0.0f, 0.0f);
+
     while (!glfwWindowShouldClose(window)) {
+
+        float currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        // Handle user input to update the target camera position
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            targetPosition.y += 10.0f * deltaTime;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            targetPosition.y -= 10.0f * deltaTime;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            targetPosition.x -= 10.0f * deltaTime;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            targetPosition.x += 10.0f * deltaTime;
+
+        // Smoothly interpolate camera position towards the target position
+        float smoothingFactor = 5.f; // Adjust as needed
+
+        // cameraPosition.x = glm::mix(cameraPosition.x, targetPosition.x, smoothingFactor * deltaTime);
+        // cameraPosition.y = glm::mix(cameraPosition.y, targetPosition.y, smoothingFactor * deltaTime);
+
+        // cameraSpeed = 2.5f / zoomLevel;
+        // targetPosition *= zoomLevel;
+        cameraPosition = glm::mix(cameraPosition, targetPosition, smoothingFactor * deltaTime);
+
+        viewpoint *= zoomLevel;
+
+        // Create a view matrix (assuming 2D orthographic projection)
+        glm::mat4 viewMatrix = glm::lookAt(glm::vec3(cameraPosition.x, cameraPosition.y, 0.0f), glm::vec3(cameraPosition.x, cameraPosition.y, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        glUniformMatrix4fv(view_location, 1, GL_FALSE, glm::value_ptr(viewMatrix));
 
         glClear(GL_COLOR_BUFFER_BIT);
 
         glDrawElements(GL_TRIANGLES, quads.size() * 6, GL_UNSIGNED_INT, nullptr);
 
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        //ImGui::ShowDemoWindow();
+        ImGui::Begin("Tools");
+        ImGui::DragFloat2("Camera target position", (float*)&targetPosition);
+
+        // Zoom control
+        ImGui::Text("Zoom Level: %.2f", zoomLevel);
+        ImGui::SliderFloat("Zoom", &zoomLevel, 0.1f, 3.0f);
+
+        ImGui::End();
+
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
+
+    // Cleanup
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
 }
